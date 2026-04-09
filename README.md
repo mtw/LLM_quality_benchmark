@@ -67,6 +67,12 @@ To enable YAML config files for round-robin mode:
 python3 -m pip install -e '.[yaml]'
 ```
 
+To show progress bars during round-robin runs:
+
+```bash
+python3 -m pip install -e '.[progress]'
+```
+
 ### 3) Run the benchmark against an Ollama host on your LAN
 
 If your models run on another machine in your LAN, point to its Ollama HTTP API:

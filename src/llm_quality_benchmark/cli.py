@@ -311,6 +311,11 @@ def _build_round_robin_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reuse existing outputs/scores when present (continues on parse errors).",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress bars/logging (useful for non-TTY output).",
+    )
     return parser
 
 
@@ -332,6 +337,7 @@ def _main_round_robin(argv: list[str] | None) -> int:
         http_stream=bool(args.http_stream),
         http_retries=int(args.http_retries),
         skip_existing=bool(args.skip_existing),
+        show_progress=(not bool(args.no_progress)),
     )
     return run_round_robin(rr)
 

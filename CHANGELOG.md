@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - `interpret` / `report` command to summarize an existing run directory (reads `summary.csv`) into a quick text/JSON report.
 - Round-robin judging mode (`rr`) that rotates judge models from a YAML/JSON config and produces per-judge, consensus, and judge-agreement CSV outputs.
+- Optional progress bars for round-robin runs via `.[progress]` (uses `tqdm` when available).
 
 ## [0.1.0] - 2026-04-09
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass
 import json
+import logging
 import statistics
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,17 @@ from .runtime import (
 from .types import ScoreRecord, score_record_from_judge
 
 
+log = logging.getLogger(__name__)
+
+
+def _tqdm_if_available():
+    try:
+        from tqdm import tqdm  # type: ignore
+    except Exception:
+        return None
+    return tqdm
+
+
 @dataclass(frozen=True)
 class RoundRobinRunConfig:
     prompts_dir: Path
@@ -36,6 +49,7 @@ class RoundRobinRunConfig:
     http_stream: bool = False
     http_retries: int = 0
     skip_existing: bool = False
+    show_progress: bool = True
 
 
 @dataclass(frozen=True)
@@ -144,47 +158,81 @@ def run_round_robin(config: RoundRobinRunConfig) -> int:
     (rr_dir / "ranked_models_by_judge").mkdir(parents=True, exist_ok=True)
     (rr_dir / "summary_by_judge").mkdir(parents=True, exist_ok=True)
 
+    tqdm = _tqdm_if_available() if config.show_progress else None
+    use_tqdm = bool(tqdm) and sys.stderr.isatty()
+
     # Phase A: generate candidate outputs once.
-    for model in config.config.models:
-        model_safe = safe_name(model)
-        for prompt_path in prompts:
-            prompt_stem = prompt_path.stem
-            prompt_text = prompt_path.read_text(encoding="utf-8")
+    gen_total = len(config.config.models) * len(prompts)
+    gen_skipped = 0
+    gen_pbar = tqdm(total=gen_total, desc="Generate", unit="run") if use_tqdm else None
+    if not use_tqdm:
+        log.info("Phase A: generating outputs (%d model×prompt runs)", gen_total)
 
-            raw_out_path = config.output_dir / "outputs" / model_safe / f"{prompt_stem}.txt"
-            meta_json_path = config.output_dir / "meta" / model_safe / f"{prompt_stem}.json"
+    try:
+        for model in config.config.models:
+            model_safe = safe_name(model)
+            for prompt_path in prompts:
+                prompt_stem = prompt_path.stem
+                prompt_text = prompt_path.read_text(encoding="utf-8")
 
-            if config.skip_existing and raw_out_path.exists() and meta_json_path.exists():
-                continue
+                raw_out_path = config.output_dir / "outputs" / model_safe / f"{prompt_stem}.txt"
+                meta_json_path = config.output_dir / "meta" / model_safe / f"{prompt_stem}.json"
 
-            started = time.perf_counter()
-            model_options: dict[str, Any] = {}
-            if config.num_predict is not None:
-                model_options["num_predict"] = int(config.num_predict)
+                if config.skip_existing and raw_out_path.exists() and meta_json_path.exists():
+                    gen_skipped += 1
+                    if gen_pbar:
+                        gen_pbar.update(1)
+                    continue
 
-            output_text = run_ollama(
-                model=model,
-                prompt=prompt_text,
-                temperature=config.temperature,
-                timeout=config.timeout,
-                base_url=config.ollama_url,
-                stream=bool(config.http_stream),
-                options=(model_options or None),
-                retries=int(config.http_retries),
-            )
-            run_seconds = time.perf_counter() - started
-            write_text(raw_out_path, output_text)
-            write_run_meta(
-                meta_json_path,
-                run_seconds=run_seconds,
-                temperature=config.temperature,
-                model=model,
-                prompt_file=prompt_path.name,
-            )
+                started = time.perf_counter()
+                model_options: dict[str, Any] = {}
+                if config.num_predict is not None:
+                    model_options["num_predict"] = int(config.num_predict)
+
+                output_text = run_ollama(
+                    model=model,
+                    prompt=prompt_text,
+                    temperature=config.temperature,
+                    timeout=config.timeout,
+                    base_url=config.ollama_url,
+                    stream=bool(config.http_stream),
+                    options=(model_options or None),
+                    retries=int(config.http_retries),
+                )
+                run_seconds = time.perf_counter() - started
+                write_text(raw_out_path, output_text)
+                write_run_meta(
+                    meta_json_path,
+                    run_seconds=run_seconds,
+                    temperature=config.temperature,
+                    model=model,
+                    prompt_file=prompt_path.name,
+                )
+                if gen_pbar:
+                    gen_pbar.update(1)
+    finally:
+        if gen_pbar:
+            gen_pbar.close()
+
+    if not use_tqdm:
+        log.info("Phase A complete (skipped=%d, wrote=%d).", gen_skipped, gen_total - gen_skipped)
 
     # Phase B: judge in round-robin.
     all_records: list[RoundRobinScoreRecord] = []
     records_by_judge: dict[str, list[RoundRobinScoreRecord]] = {}
+
+    judge_pairs = 0
+    for judge_model in config.config.judges:
+        for model in config.config.models:
+            if config.config.exclude_self_judging and model == judge_model:
+                continue
+            judge_pairs += 1
+    judge_total = judge_pairs * len(prompts)
+    judge_pbar = tqdm(total=judge_total, desc="Judge", unit="score") if use_tqdm else None
+    if not use_tqdm:
+        log.info("Phase B: judging (%d judge×model×prompt scores)", judge_total)
+
+    judged_skipped = 0
 
     for judge_model in config.config.judges:
         judge_safe = safe_name(judge_model)
@@ -212,6 +260,7 @@ def run_round_robin(config: RoundRobinRunConfig) -> int:
                     try:
                         judge_raw = json.loads(score_path.read_text(encoding="utf-8"))
                         judge_data = validate_score(judge_raw)
+                        judged_skipped += 1
                     except Exception:
                         judge_data = None
 
@@ -244,6 +293,13 @@ def run_round_robin(config: RoundRobinRunConfig) -> int:
                 rr_rec = RoundRobinScoreRecord(judge_model=judge_model, **asdict(score_record))
                 all_records.append(rr_rec)
                 records_by_judge.setdefault(judge_model, []).append(rr_rec)
+                if judge_pbar:
+                    judge_pbar.update(1)
+
+    if judge_pbar:
+        judge_pbar.close()
+    elif not use_tqdm:
+        log.info("Phase B complete (skipped=%d, wrote=%d).", judged_skipped, judge_total - judged_skipped)
 
     if not all_records:
         return 1
@@ -325,4 +381,3 @@ def run_round_robin(config: RoundRobinRunConfig) -> int:
     (rr_dir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
     return 0
-
