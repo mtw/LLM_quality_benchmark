@@ -81,7 +81,8 @@ def test_round_robin_handles_invalid_judge_json_with_retry(tmp_path: Path, monke
     (prompts_dir / "01.md").write_text("Say hi.", encoding="utf-8")
 
     out_dir = tmp_path / "run"
-    cfg = BenchmarkConfig(models=["a", "b"], judges=["a"], exclude_self_judging=False)
+    # Use a single candidate model so we can assert exact retry count deterministically.
+    cfg = BenchmarkConfig(models=["b"], judges=["a"], exclude_self_judging=True)
 
     attempts = 0
 
