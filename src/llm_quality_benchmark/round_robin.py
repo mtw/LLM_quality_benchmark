@@ -12,7 +12,14 @@ from typing import Any
 
 from .config import BenchmarkConfig
 from .interpret import compute_ranked_models
-from .judge import build_judge_prompt, detect_task_type, extract_json, safe_name, validate_score
+from .judge import (
+    JudgeScore,
+    build_judge_prompt,
+    detect_task_type,
+    extract_json,
+    safe_name,
+    validate_score,
+)
 from .runtime import (
     load_prompts,
     read_run_seconds,
@@ -50,6 +57,8 @@ class RoundRobinRunConfig:
     http_retries: int = 0
     skip_existing: bool = False
     show_progress: bool = True
+    judge_json_retries: int = 2
+    on_judge_error: str = "fail_record"  # fail_record | skip | raise
 
 
 @dataclass(frozen=True)
@@ -146,6 +155,77 @@ def _rank_order_from_ranked_rows(rows: list[dict[str, Any]]) -> list[str]:
 
 def _rr_dir(output_dir: Path) -> Path:
     return output_dir / "round_robin"
+
+
+def _sanitize_score_dict(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return data
+
+    out = dict(data)
+    for k in [
+        "instruction_following",
+        "correctness",
+        "completeness",
+        "clarity",
+        "actionability",
+        "hallucination_risk",
+        "overall",
+    ]:
+        if k not in out:
+            continue
+        v = out[k]
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit():
+                out[k] = int(s)
+        elif isinstance(v, float) and v.is_integer():
+            out[k] = int(v)
+    return out
+
+
+def _error_dir(rr_dir: Path, *, judge_model: str, model: str) -> Path:
+    return rr_dir / "errors_by_judge" / safe_name(judge_model) / safe_name(model)
+
+
+def _default_fail_score(*, notes: str) -> JudgeScore:
+    return JudgeScore(
+        instruction_following=1,
+        correctness=1,
+        completeness=1,
+        clarity=1,
+        actionability=1,
+        hallucination_risk=1,
+        overall=1,
+        verdict="poor",
+        pass_fail="fail",
+        notes=notes[:500],
+    )
+
+
+def _judge_once(
+    *,
+    judge_model: str,
+    judge_prompt: str,
+    judge_temperature: float,
+    timeout: int,
+    base_url: str | None,
+    stream: bool,
+    options: dict[str, Any] | None,
+    retries: int,
+) -> tuple[JudgeScore, str]:
+    judge_raw_text = run_ollama(
+        model=judge_model,
+        prompt=judge_prompt,
+        temperature=judge_temperature,
+        timeout=timeout,
+        base_url=base_url,
+        stream=bool(stream),
+        options=options,
+        retries=int(retries),
+    )
+    raw_obj = extract_json(judge_raw_text)
+    raw_obj = _sanitize_score_dict(raw_obj)
+    return validate_score(raw_obj), judge_raw_text
 
 
 def run_round_robin(config: RoundRobinRunConfig) -> int:
@@ -269,18 +349,58 @@ def run_round_robin(config: RoundRobinRunConfig) -> int:
                     judge_options: dict[str, Any] = {}
                     if config.judge_num_predict is not None:
                         judge_options["num_predict"] = int(config.judge_num_predict)
-                    judge_raw_text = run_ollama(
-                        model=judge_model,
-                        prompt=judge_prompt,
-                        temperature=config.judge_temperature,
-                        timeout=config.timeout,
-                        base_url=config.ollama_url,
-                        stream=bool(config.http_stream),
-                        options=(judge_options or None),
-                        retries=int(config.http_retries),
-                    )
-                    judge_data = validate_score(extract_json(judge_raw_text))
-                    write_json(score_path, judge_data.to_dict())
+                    last_raw: str | None = None
+                    policy = (config.on_judge_error or "fail_record").strip().lower()
+                    for attempt in range(max(0, int(config.judge_json_retries)) + 1):
+                        try:
+                            judge_data, last_raw = _judge_once(
+                                judge_model=judge_model,
+                                judge_prompt=judge_prompt,
+                                judge_temperature=config.judge_temperature,
+                                timeout=config.timeout,
+                                base_url=config.ollama_url,
+                                stream=bool(config.http_stream),
+                                options=(judge_options or None),
+                                retries=int(config.http_retries),
+                            )
+                            write_json(score_path, judge_data.to_dict())
+                            break
+                        except Exception as exc:
+                            if attempt < int(config.judge_json_retries):
+                                continue
+
+                            err_dir = _error_dir(rr_dir, judge_model=judge_model, model=model)
+                            err_dir.mkdir(parents=True, exist_ok=True)
+                            (err_dir / f"{prompt_stem}.json").write_text(
+                                json.dumps(
+                                    {
+                                        "error": str(exc),
+                                        "judge_model": judge_model,
+                                        "model": model,
+                                        "prompt_file": prompt_path.name,
+                                    },
+                                    indent=2,
+                                    ensure_ascii=False,
+                                ),
+                                encoding="utf-8",
+                            )
+                            if last_raw is not None:
+                                (err_dir / f"{prompt_stem}.txt").write_text(last_raw, encoding="utf-8")
+
+                            if policy == "raise":
+                                raise
+                            if policy == "skip":
+                                judge_data = None
+                                break
+
+                            judge_data = _default_fail_score(notes=f"Invalid judge JSON: {exc}")
+                            write_json(score_path, judge_data.to_dict())
+                            break
+
+                    if judge_data is None:
+                        if judge_pbar:
+                            judge_pbar.update(1)
+                        continue
 
                 score_record = score_record_from_judge(
                     model=model,

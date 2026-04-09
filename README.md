@@ -143,11 +143,14 @@ python3 llm_quality_benchmark.py rr \
   --skip-existing
 ```
 
+If a judge returns invalid JSON or out-of-range scores, the runner retries (`--judge-json-retries`, default 2). After retries it either writes a failing record (default), skips, or raises (`--on-judge-error`).
+
 Key outputs are written under `benchmark_runs/round_robin/`:
 - `summary.csv`: prompt-level rows with `judge_model`
 - `ranked_models_by_judge/<judge>.csv`: per-judge ranking
 - `consensus_ranked_models.csv`: aggregated ranking across judges (median/mean + stdev)
 - `judge_agreement.csv`: pairwise judge agreement (Spearman rho over model order)
+- `errors_by_judge/<judge>/<model>/`: raw judge outputs and error metadata when judge JSON is invalid after retries
 
 ## Interpreting results
 

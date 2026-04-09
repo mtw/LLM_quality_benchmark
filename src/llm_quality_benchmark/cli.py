@@ -312,6 +312,18 @@ def _build_round_robin_parser() -> argparse.ArgumentParser:
         help="Reuse existing outputs/scores when present (continues on parse errors).",
     )
     parser.add_argument(
+        "--judge-json-retries",
+        type=int,
+        default=2,
+        help="Retry judge calls this many times when judge JSON is invalid/out-of-range.",
+    )
+    parser.add_argument(
+        "--on-judge-error",
+        choices=["fail_record", "skip", "raise"],
+        default="fail_record",
+        help="When judge JSON stays invalid after retries: write a failing record, skip it, or raise.",
+    )
+    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable progress bars/logging (useful for non-TTY output).",
@@ -338,6 +350,8 @@ def _main_round_robin(argv: list[str] | None) -> int:
         http_retries=int(args.http_retries),
         skip_existing=bool(args.skip_existing),
         show_progress=(not bool(args.no_progress)),
+        judge_json_retries=int(args.judge_json_retries),
+        on_judge_error=str(args.on_judge_error),
     )
     return run_round_robin(rr)
 
