@@ -61,6 +61,12 @@ To install pytest for running tests:
 python3 -m pip install -e '.[test]'
 ```
 
+To enable YAML config files for round-robin mode:
+
+```bash
+python3 -m pip install -e '.[yaml]'
+```
+
 ### 3) Run the benchmark against an Ollama host on your LAN
 
 If your models run on another machine in your LAN, point to its Ollama HTTP API:
@@ -103,6 +109,39 @@ After a run completes:
 - `benchmark_runs/outputs/` contains raw model outputs
 - `benchmark_runs/scores/` contains judge JSON outputs
 - `benchmark_runs/meta/` contains run timing and config metadata
+
+## Round-robin judging (multi-judge)
+
+In round-robin mode, every judge model scores every candidate model (optionally excluding itself), using the same prompt set and reusing the same candidate outputs. This helps reduce single-judge bias.
+
+Create a config file (YAML or JSON):
+
+```yaml
+models:
+  - llama3.1:8b
+  - qwen2.5-coder:7b
+judges:
+  - llama3.1:8b
+  - qwen2.5-coder:7b
+exclude_self_judging: true
+```
+
+Run it:
+
+```bash
+python3 llm_quality_benchmark.py rr \
+  --config benchmark.yml \
+  --prompts-dir prompts \
+  --output-dir benchmark_runs \
+  --ollama-url http://my-llm-host:11434 \
+  --skip-existing
+```
+
+Key outputs are written under `benchmark_runs/round_robin/`:
+- `summary.csv`: prompt-level rows with `judge_model`
+- `ranked_models_by_judge/<judge>.csv`: per-judge ranking
+- `consensus_ranked_models.csv`: aggregated ranking across judges (median/mean + stdev)
+- `judge_agreement.csv`: pairwise judge agreement (Spearman rho over model order)
 
 ## Interpreting results
 

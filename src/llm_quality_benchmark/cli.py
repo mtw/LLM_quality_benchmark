@@ -9,8 +9,10 @@ import sys
 import time
 from pathlib import Path
 
+from .config import load_benchmark_config
 from .judge import JudgeScore, build_judge_prompt, detect_task_type, extract_json, safe_name, validate_score
 from .interpret import format_text_report, interpret_run
+from .round_robin import RoundRobinRunConfig, run_round_robin
 from .runtime import load_prompts, read_run_seconds, run_ollama, write_json, write_run_meta, write_text
 from .summary import summarize
 from .types import ScoreRecord, score_record_from_judge
@@ -268,8 +270,78 @@ def _main_interpret(argv: list[str] | None) -> int:
     return 0
 
 
+def _build_round_robin_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run a round-robin benchmark where each judge scores all models.")
+    parser.add_argument("--config", type=Path, required=True, help="YAML or JSON file listing models/judges.")
+    parser.add_argument("--prompts-dir", type=Path, required=True, help="Directory containing .md prompt files")
+    parser.add_argument("--output-dir", type=Path, required=True, help="Directory for outputs and round-robin results")
+    parser.add_argument(
+        "--ollama-url",
+        default=os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_URL"),
+        help="Base URL for Ollama HTTP API, e.g. http://host:11434 (or set OLLAMA_BASE_URL). If omitted, uses local `ollama` CLI.",
+    )
+    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for benchmarked models")
+    parser.add_argument("--judge-temperature", type=float, default=0.0, help="Temperature for judge models")
+    parser.add_argument(
+        "--num-predict",
+        type=int,
+        default=None,
+        help="Max tokens to generate for benchmarked models (Ollama option `num_predict`).",
+    )
+    parser.add_argument(
+        "--judge-num-predict",
+        type=int,
+        default=None,
+        help="Max tokens to generate for judge models (Ollama option `num_predict`).",
+    )
+    parser.add_argument("--timeout", type=int, default=1800, help="Timeout in seconds per ollama run")
+    parser.add_argument(
+        "--http-stream",
+        action="store_true",
+        help="When using --ollama-url, enable streaming responses to reduce long silent waits.",
+    )
+    parser.add_argument(
+        "--http-retries",
+        type=int,
+        default=0,
+        help="When using --ollama-url, retry transient HTTP failures this many times.",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Reuse existing outputs/scores when present (continues on parse errors).",
+    )
+    return parser
+
+
+def _main_round_robin(argv: list[str] | None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    parser = _build_round_robin_parser()
+    args = parser.parse_args(argv)
+    cfg = load_benchmark_config(Path(args.config))
+    rr = RoundRobinRunConfig(
+        prompts_dir=args.prompts_dir,
+        output_dir=args.output_dir,
+        config=cfg,
+        ollama_url=args.ollama_url,
+        temperature=float(args.temperature),
+        judge_temperature=float(args.judge_temperature),
+        num_predict=args.num_predict,
+        judge_num_predict=args.judge_num_predict,
+        timeout=int(args.timeout),
+        http_stream=bool(args.http_stream),
+        http_retries=int(args.http_retries),
+        skip_existing=bool(args.skip_existing),
+    )
+    return run_round_robin(rr)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv_list = list(argv) if argv is not None else sys.argv[1:]
-    if argv_list and argv_list[0] in {"interpret", "report"}:
-        return _main_interpret(argv_list[1:])
+    if argv_list:
+        cmd = argv_list[0]
+        if cmd in {"interpret", "report"}:
+            return _main_interpret(argv_list[1:])
+        if cmd in {"round-robin", "round_robin", "rr"}:
+            return _main_round_robin(argv_list[1:])
     return _main_run(argv_list)

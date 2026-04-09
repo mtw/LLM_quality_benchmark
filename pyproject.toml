@@ -25,6 +25,7 @@ llm-quality-benchmark = "llm_quality_benchmark.cli:main"
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 dev = ["pytest>=7.0"]
+yaml = ["PyYAML>=6.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
