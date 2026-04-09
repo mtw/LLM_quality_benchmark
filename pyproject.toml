@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-quality-benchmark"
+authors = [
+  { name = "Michael T. Wolfinger", email = "michael@wolfinger.eu" }
+]
+version = "0.1.0"
+description = "Local Ollama LLM quality benchmark runner"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/mtw/LLM_quality_benchmark"
+Issues = "https://github.com/mtw/LLM_quality_benchmark/issues"
+Changelog = "https://github.com/mtw/LLM_quality_benchmark/blob/main/CHANGELOG.md"
+
+[project.scripts]
+llm-quality-benchmark = "llm_quality_benchmark.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

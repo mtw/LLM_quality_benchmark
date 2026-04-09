@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Benchmark outputs / local runs
+benchmark_runs/
+
+# Packaging/build artifacts
+*.egg-info/
+build/
+dist/
+tbi_LLMs.yml
+
