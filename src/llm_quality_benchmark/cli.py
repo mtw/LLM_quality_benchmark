@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from .judge import JudgeScore, build_judge_prompt, detect_task_type, extract_json, safe_name, validate_score
+from .interpret import format_text_report, interpret_run
 from .runtime import load_prompts, read_run_seconds, run_ollama, write_json, write_run_meta, write_text
 from .summary import summarize
 from .types import ScoreRecord, score_record_from_judge
@@ -236,8 +237,39 @@ def _config_from_args(args: argparse.Namespace) -> RunnerConfig:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main_run(argv: list[str] | None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = _build_parser()
     args = parser.parse_args(argv)
     return run_benchmark(_config_from_args(args))
+
+
+def _build_interpret_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Interpret an existing benchmark run directory.")
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        required=True,
+        help="Benchmark run output directory containing summary.csv (and optionally ranked_models.csv).",
+    )
+    parser.add_argument("--top", type=int, default=5, help="How many top models to show.")
+    parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format.")
+    return parser
+
+
+def _main_interpret(argv: list[str] | None) -> int:
+    parser = _build_interpret_parser()
+    args = parser.parse_args(argv)
+    result = interpret_run(Path(args.run_dir), top_n=int(args.top))
+    if args.format == "json":
+        sys.stdout.write(result.to_json() + "\n")
+    else:
+        sys.stdout.write(format_text_report(result))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
+    if argv_list and argv_list[0] in {"interpret", "report"}:
+        return _main_interpret(argv_list[1:])
+    return _main_run(argv_list)

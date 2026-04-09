@@ -104,6 +104,20 @@ After a run completes:
 - `benchmark_runs/scores/` contains judge JSON outputs
 - `benchmark_runs/meta/` contains run timing and config metadata
 
+## Interpreting results
+
+To generate a quick human-readable report from `summary.csv`:
+
+```bash
+python3 llm_quality_benchmark.py interpret --run-dir benchmark_runs --top 5
+```
+
+JSON output:
+
+```bash
+python3 llm_quality_benchmark.py interpret --run-dir benchmark_runs --format json
+```
+
 ## Notes / Tips
 
 - Use `--skip-existing` to avoid re-running prompts that already have output and score files.
