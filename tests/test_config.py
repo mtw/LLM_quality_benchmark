@@ -26,3 +26,24 @@ def test_load_benchmark_config_json(tmp_path: Path) -> None:
     assert cfg.judges == ["b"]
     assert cfg.exclude_self_judging is False
 
+
+def test_load_benchmark_config_yaml(tmp_path: Path) -> None:
+    pytest.importorskip("yaml")
+    p = tmp_path / "cfg.yml"
+    p.write_text(
+        "\n".join(
+            [
+                "models:",
+                "  - a",
+                "judges:",
+                "  - b",
+                "exclude_self_judging: false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_benchmark_config(p)
+    assert cfg.models == ["a"]
+    assert cfg.judges == ["b"]
+    assert cfg.exclude_self_judging is False
