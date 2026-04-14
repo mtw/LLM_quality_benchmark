@@ -12,7 +12,6 @@ description = "Local Ollama LLM quality benchmark runner"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = []
 
 [project.urls]
 Repository = "https://github.com/mtw/LLM_quality_benchmark"
